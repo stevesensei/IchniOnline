@@ -1,4 +1,6 @@
+using IchniOnline.Server.Mapper;
 using IchniOnline.Server.Models;
+using IchniOnline.Server.Models.Dto;
 using IchniOnline.Server.Models.Game;
 using System.Text.Json;
 
@@ -250,5 +252,100 @@ public class BeatmapJsonTests
         Assert.That(beatmapRoot.Beatmap.Value.Elements.Count, Is.EqualTo(2));
         Assert.That(beatmapRoot.Beatmap.Value.Elements[0], Is.InstanceOf<StayElement>());
         Assert.That(beatmapRoot.Beatmap.Value.Elements[1], Is.InstanceOf<TapElement>());
+    }
+
+    [Test]
+    public void ToNoteDtos_ExtractsOnlyNoteTypes()
+    {
+        // Arrange
+        var json = """
+        {
+            "Beatmap": {
+                "__type": "Ichni.RhythmGame.Beatmap.BeatmapContainer_BM,Assembly-CSharp",
+                "value": {
+                    "elementList": [
+                        {
+                            "__type": "Ichni.RhythmGame.Beatmap.Stay_BM,Assembly-CSharp",
+                            "exactJudgeTime": 16.17,
+                            "elementName": "Stay (16.17)",
+                            "tags": [],
+                            "elementGuid": {
+                                "value": "c0a7832d-9d10-4d32-abf6-ca17409aab69"
+                            }
+                        },
+                        {
+                            "__type": "Ichni.RhythmGame.Beatmap.Tap_BM,Assembly-CSharp",
+                            "exactJudgeTime": 49.7200623,
+                            "elementName": "Tap (49.72006)",
+                            "tags": [],
+                            "elementGuid": {
+                                "value": "b78202fe-d502-482f-9d61-268585b7ce9b"
+                            }
+                        },
+                        {
+                            "__type": "Ichni.RhythmGame.Beatmap.ColorSubmodule_BM,Assembly-CSharp",
+                            "originalBaseColor": { "r": 1, "g": 1, "b": 1, "a": 1 },
+                            "emissionEnabled": false,
+                            "attachedElementGuid": {
+                                "value": "322fe95e-65df-42bc-9b22-1aff8c4656f2"
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+        """;
+        var beatmapRoot = JsonSerializer.Deserialize<BeatmapRoot>(json, JsonOptions);
+
+        // Act
+        var notes = BeatmapMapper.ToNoteDtos(beatmapRoot!);
+
+        // Assert
+        Assert.That(notes, Has.Count.EqualTo(2));
+        Assert.That(notes[0].NoteGuid, Is.EqualTo(Guid.Parse("c0a7832d-9d10-4d32-abf6-ca17409aab69")));
+        Assert.That(notes[0].NoteType, Is.EqualTo(SaveDataType.Stay));
+        Assert.That(notes[0].JudgeTime, Is.EqualTo(16.17));
+        Assert.That(notes[1].NoteGuid, Is.EqualTo(Guid.Parse("b78202fe-d502-482f-9d61-268585b7ce9b")));
+        Assert.That(notes[1].NoteType, Is.EqualTo(SaveDataType.Tap));
+        Assert.That(notes[1].JudgeTime, Is.EqualTo(49.7200623));
+    }
+
+    [Test]
+    public void ToNoteDtos_ReturnsEmptyList_WhenNoNotes()
+    {
+        // Arrange
+        var json = """
+        {
+            "Beatmap": {
+                "__type": "Ichni.RhythmGame.Beatmap.BeatmapContainer_BM,Assembly-CSharp",
+                "value": {
+                    "elementList": [
+                        {
+                            "__type": "Ichni.RhythmGame.Beatmap.ColorSubmodule_BM,Assembly-CSharp",
+                            "originalBaseColor": { "r": 1, "g": 1, "b": 1, "a": 1 },
+                            "emissionEnabled": false,
+                            "elementGuid": {
+                                "value": "322fe95e-65df-42bc-9b22-1aff8c4656f2"
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+        """;
+        var beatmapRoot = JsonSerializer.Deserialize<BeatmapRoot>(json, JsonOptions);
+
+        // Act
+        var notes = BeatmapMapper.ToNoteDtos(beatmapRoot!);
+
+        // Assert
+        Assert.That(notes, Is.Empty);
+    }
+
+    [Test]
+    public void ToNoteDtos_ThrowsArgumentNullException_WhenRootIsNull()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => BeatmapMapper.ToNoteDtos(null!));
     }
 }
