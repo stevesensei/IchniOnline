@@ -39,6 +39,6 @@ public class SaveDataTypeJsonConverter : JsonConverter<SaveDataType>
 
     public override void Write(Utf8JsonWriter writer, SaveDataType value, JsonSerializerOptions options)
     {
-        writer.WriteStringValue(EnumToString[value]);
+        writer.WriteNumberValue((int)value);
     }
 }

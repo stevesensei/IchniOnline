@@ -10,6 +10,7 @@ builder.Services.AddProblemDetails();
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+builder.Services.AddControllers();
 builder.Services.AddNpgsqlDataSource("MainDB");
 builder.Services.AddDbContext(builder.Configuration,"MainDB");
 builder.AddRedisClient("cache");
@@ -43,7 +44,7 @@ api.MapGet("weatherforecast", () =>
     .WithName("GetWeatherForecast");
 
 app.MapDefaultEndpoints();
-
+app.MapControllers();
 app.UseFileServer();
 
 app.Run();
