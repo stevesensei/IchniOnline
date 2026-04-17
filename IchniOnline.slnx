@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="IchniOnline.AppHost/IchniOnline.AppHost.csproj" />
+  <Project Path="IchniOnline.Server/IchniOnline.Server.csproj" />
+</Solution>
