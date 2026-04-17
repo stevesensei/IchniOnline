@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using IchniOnline.Server.Utils;
 
 namespace IchniOnline.Server.Models.Game;
 
@@ -16,6 +17,7 @@ public sealed class Beatmap: SaveBaseData
 public class BeatmapWrapper
 {
     [JsonPropertyName("elementList")]
+    [JsonConverter(typeof(GameElementListJsonConverter))]
     public List<GameElement> Elements { get; set; } = null!;
 }
 

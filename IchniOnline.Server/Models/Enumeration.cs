@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using IchniOnline.Server.Utils;
+
 namespace IchniOnline.Server.Models;
 
 public enum UserPermission
@@ -7,6 +10,7 @@ public enum UserPermission
     Admin = 2
 }
 
+[JsonConverter(typeof(SaveDataTypeJsonConverter))]
 public enum SaveDataType
 {
     None = 0,
