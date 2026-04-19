@@ -1,4 +1,10 @@
+using System.Text;
+using IchniOnline.Server.Models.Options;
+using IchniOnline.Server.Service;
+using IchniOnline.Server.Service.Interface;
 using IchniOnline.Server.Utilities;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,6 +20,31 @@ builder.Services.AddControllers();
 builder.Services.AddNpgsqlDataSource("MainDB");
 builder.Services.AddDbContext(builder.Configuration,"MainDB");
 builder.AddRedisClient("cache");
+
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
+builder.Services.AddScoped<IUserService, UserService>();
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()!;
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = jwtOptions.Issuer,
+        ValidAudience = jwtOptions.Audience,
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Key))
+    };
+});
+builder.Services.AddAuthorization();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -45,6 +76,8 @@ api.MapGet("weatherforecast", () =>
 
 app.MapDefaultEndpoints();
 app.MapControllers();
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseFileServer();
 
 app.Run();
