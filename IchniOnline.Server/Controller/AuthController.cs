@@ -20,31 +20,31 @@ public class AuthController : ControllerBase
     }
 
     [HttpGet("session-key")]
-    public async Task<ActionResult<GlobalResponse<string>>> GetSessionKey()
+    public async Task<GlobalResponse<string>> GetSessionKey()
     {
         var result = await _userService.GetSessionKeyAsync();
 
-        return result.Match<ActionResult<GlobalResponse<string>>>(
+        return result.Match<GlobalResponse<string>>(
             sessionKey => GlobalResponse<string>.Ok(sessionKey, "Session key generated"),
             errors => GlobalResponse<string>.Unauthorized(errors.First().Description));
     }
 
     [HttpPost("login")]
-    public async Task<ActionResult<GlobalResponse<LoginResponse>>> Login([FromBody] LoginRequest request)
+    public async Task<GlobalResponse<LoginResponse>> Login([FromBody] LoginRequest request)
     {
         var result = await _userService.LoginAsync(request);
 
-        return result.Match<ActionResult<GlobalResponse<LoginResponse>>>(
+        return result.Match<GlobalResponse<LoginResponse>>(
             response => GlobalResponse<LoginResponse>.Ok(response, "Login successful"),
             errors => GlobalResponse<LoginResponse>.Unauthorized(errors.First().Description));
     }
 
     [HttpPost("register")]
-    public async Task<ActionResult<GlobalResponse<UserResponse>>> Register([FromBody] RegisterRequest request)
+    public async Task<GlobalResponse<UserResponse>> Register([FromBody] RegisterRequest request)
     {
         var result = await _userService.RegisterAsync(request);
 
-        return result.Match<ActionResult<GlobalResponse<UserResponse>>>(
+        return result.Match<GlobalResponse<UserResponse>>(
             response => GlobalResponse<UserResponse>.Ok(response, "Registration successful"),
             errors => GlobalResponse<UserResponse>.BadRequest(errors.First().Description));
     }

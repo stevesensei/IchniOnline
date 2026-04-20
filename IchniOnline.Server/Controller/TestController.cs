@@ -2,6 +2,7 @@
 using IchniOnline.Server.Mapper;
 using IchniOnline.Server.Models.Dto;
 using IchniOnline.Server.Models.Game;
+using IchniOnline.Server.Models.Responses;
 using IchniOnline.Server.Utilities;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,7 +13,7 @@ namespace IchniOnline.Server.Controller;
 public class TestController : ControllerBase
 {
     [HttpPost("beatmap/decode")]
-    public ActionResult<List<BeatmapNoteDto>> DecodeBeatmap(
+    public GlobalResponse<List<BeatmapNoteDto>> DecodeBeatmap(
         IFormFile file,
         [FromForm] string password,
         [FromForm] bool isGzip)
@@ -24,10 +25,10 @@ public class TestController : ControllerBase
         var (beatmapRoot, _) = EasySaveUtils.DecryptJson<BeatmapRoot>(password, hexContent, isGzip);
 
         if (beatmapRoot is null)
-            return BadRequest("Failed to decrypt or parse beatmap");
+            return GlobalResponse<List<BeatmapNoteDto>>.BadRequest("Failed to decrypt or parse beatmap");
 
         var notes = BeatmapMapper.ToNoteDtos(beatmapRoot);
-        return Ok(notes);
+        return GlobalResponse<List<BeatmapNoteDto>>.Ok(notes, "Beatmap decoded");
     }
 }
 

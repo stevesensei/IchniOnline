@@ -14,79 +14,73 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using SqlSugar;
 using StackExchange.Redis;
+using System.Text.Json;
 
 namespace IchniOnline.Server.Service;
 
-public class UserService : IUserService
+public class UserService(
+    ISqlSugarClient db,
+    IConnectionMultiplexer redis,
+    IOptions<JwtOptions> jwtOptions,
+    ILogger<UserService> logger)
+    : IUserService
 {
-    private readonly ISqlSugarClient _db;
-    private readonly IConnectionMultiplexer _redis;
-    private readonly JwtOptions _jwtOptions;
-    private readonly ILogger<UserService> _logger;
+    private readonly JwtOptions _jwtOptions = jwtOptions.Value;
 
     private const string SessionKeyPrefix = "session_key:";
     private const int SessionKeyExpirationMinutes = 5;
-
-    public UserService(
-        ISqlSugarClient db,
-        IConnectionMultiplexer redis,
-        IOptions<JwtOptions> jwtOptions,
-        ILogger<UserService> logger)
-    {
-        _db = db;
-        _redis = redis;
-        _jwtOptions = jwtOptions.Value;
-        _logger = logger;
-    }
+    private const string UserIdCachePrefix = "user:id:";
+    private const string UserNameCachePrefix = "user:name:";
+    private const string NullUserCacheValue = "__NOT_FOUND__";
+    private static readonly TimeSpan NotFoundUserTtl = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan UserCacheTtl = TimeSpan.FromMinutes(1);
 
     public async Task<ErrorOr<string>> GetSessionKeyAsync()
     {
         var sessionKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-        var db = _redis.GetDatabase();
-        await db.StringSetAsync(
+        var database = redis.GetDatabase();
+        await database.StringSetAsync(
             $"{SessionKeyPrefix}{sessionKey}",
             sessionKey,
             TimeSpan.FromMinutes(SessionKeyExpirationMinutes));
 
-        _logger.LogInformation("Generated new session key");
+        logger.LogInformation("Generated new session key");
         return sessionKey;
     }
 
     public async Task<ErrorOr<LoginResponse>> LoginAsync(LoginRequest request)
     {
-        var db = _redis.GetDatabase();
-        var storedKey = await db.StringGetAsync($"{SessionKeyPrefix}{request.SessionKey}");
+        var database = redis.GetDatabase();
+        var storedKey = await database.StringGetAsync($"{SessionKeyPrefix}{request.SessionKey}");
 
         if (!storedKey.HasValue)
         {
-            _logger.LogWarning("Invalid or expired session key: {SessionKey}", request.SessionKey);
-            return ErrorOr.Error.Unauthorized("Invalid or expired session key");
+            logger.LogWarning("Invalid or expired session key: {SessionKey}", request.SessionKey);
+            return Error.Unauthorized("Invalid or expired session key");
         }
 
-        var user = await _db.Queryable<GameUser>()
-            .Where(u => u.Username == request.Username)
-            .FirstAsync();
+        var user = await GetUserByUsernameCachedAsync(request.Username);
 
         if (user is null)
         {
-            _logger.LogWarning("User not found: {Username}", request.Username);
-            return ErrorOr.Error.NotFound("User not found");
+            logger.LogWarning("User not found: {Username}", request.Username);
+            return Error.NotFound("User not found");
         }
 
         if (string.IsNullOrEmpty(user.PasswordHashed))
         {
-            return ErrorOr.Error.Failure("Password not set for this user");
+            return Error.Failure("Password not set for this user");
         }
 
         var decryptedPassword = DecryptPassword(request.EncryptedPassword, request.SessionKey);
 
         if (!BCrypt.Net.BCrypt.Verify(decryptedPassword, user.PasswordHashed))
         {
-            _logger.LogWarning("Invalid password for user: {Username}", request.Username);
-            return ErrorOr.Error.Unauthorized("Invalid credentials");
+            logger.LogWarning("Invalid password for user: {Username}", request.Username);
+            return Error.Unauthorized("Invalid credentials");
         }
 
-        await db.KeyDeleteAsync($"{SessionKeyPrefix}{request.SessionKey}");
+        await database.KeyDeleteAsync($"{SessionKeyPrefix}{request.SessionKey}");
 
         var token = GenerateJwtToken(user);
         var response = new LoginResponse(
@@ -98,19 +92,17 @@ public class UserService : IUserService
                 user.AvatarUrl,
                 (int)user.Permission));
 
-        _logger.LogInformation("User logged in successfully: {Username}", user.Username);
+        logger.LogInformation("User logged in successfully: {Username}", user.Username);
         return response;
     }
 
     public async Task<ErrorOr<UserResponse>> RegisterAsync(RegisterRequest request)
     {
-        var existingUser = await _db.Queryable<GameUser>()
-            .Where(u => u.Username == request.Username)
-            .FirstAsync();
+        var existingUser = await GetUserByUsernameCachedAsync(request.Username);
 
         if (existingUser is not null)
         {
-            return ErrorOr.Error.Conflict("Username already exists");
+            return Error.Conflict("Username already exists");
         }
 
         var passwordHashed = BCrypt.Net.BCrypt.HashPassword(request.Password);
@@ -124,9 +116,10 @@ public class UserService : IUserService
             Permission = UserPermission.Player
         };
 
-        await _db.Insertable(newUser).ExecuteCommandAsync();
+        await db.Insertable(newUser).ExecuteCommandAsync();
+        await CacheUserAsync(newUser);
 
-        _logger.LogInformation("New user registered: {Username}", request.Username);
+        logger.LogInformation("New user registered: {Username}", request.Username);
 
         return new UserResponse(
             newUser.UserId,
@@ -138,13 +131,11 @@ public class UserService : IUserService
 
     public async Task<ErrorOr<UserDto>> GetUserByIdAsync(Guid userId)
     {
-        var user = await _db.Queryable<GameUser>()
-            .Where(u => u.UserId == userId)
-            .FirstAsync();
+        var user = await GetUserByIdCachedAsync(userId);
 
         if (user is null)
         {
-            return ErrorOr.Error.NotFound("User not found");
+            return Error.NotFound("User not found");
         }
 
         return new UserDto(
@@ -152,18 +143,16 @@ public class UserService : IUserService
             user.Username,
             user.DisplayName,
             user.AvatarUrl,
-            (UserPermission)user.Permission);
+            user.Permission);
     }
 
     public async Task<ErrorOr<UserDto>> UpdateUserAsync(Guid userId, string? displayName, string? avatarUrl)
     {
-        var user = await _db.Queryable<GameUser>()
-            .Where(u => u.UserId == userId)
-            .FirstAsync();
+        var user = await GetUserByIdCachedAsync(userId);
 
         if (user is null)
         {
-            return ErrorOr.Error.NotFound("User not found");
+            return Error.NotFound("User not found");
         }
 
         if (displayName is not null)
@@ -171,34 +160,36 @@ public class UserService : IUserService
         if (avatarUrl is not null)
             user.AvatarUrl = avatarUrl;
 
-        await _db.Updateable(user).ExecuteCommandAsync();
+        await db.Updateable(user).ExecuteCommandAsync();
+        await CacheUserAsync(user);
 
-        _logger.LogInformation("User updated: {UserId}", userId);
+        logger.LogInformation("User updated: {UserId}", userId);
 
         return new UserDto(
             user.UserId,
             user.Username,
             user.DisplayName,
             user.AvatarUrl,
-            (UserPermission)user.Permission);
+            user.Permission);
     }
 
     public async Task<ErrorOr<bool>> DeleteUserAsync(Guid userId)
     {
-        var user = await _db.Queryable<GameUser>()
-            .Where(u => u.UserId == userId)
-            .FirstAsync();
+        var user = await GetUserByIdCachedAsync(userId);
 
         if (user is null)
         {
-            return ErrorOr.Error.NotFound("User not found");
+            return Error.NotFound("User not found");
         }
 
-        await _db.Deleteable<GameUser>()
+        await db.Deleteable<GameUser>()
             .Where(u => u.UserId == userId)
             .ExecuteCommandAsync();
 
-        _logger.LogInformation("User deleted: {UserId}", userId);
+        await CacheNullUserAsync(GetUserByIdCacheKey(userId));
+        await CacheNullUserAsync(GetUserNameCacheKey(user.Username));
+
+        logger.LogInformation("User deleted: {UserId}", userId);
         return true;
     }
 
@@ -238,4 +229,92 @@ public class UserService : IUserService
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
+
+    private async Task<GameUser?> GetUserByIdCachedAsync(Guid userId)
+    {
+        var db1 = redis.GetDatabase();
+        var cacheKey = GetUserByIdCacheKey(userId);
+        var cached = await db1.StringGetAsync(cacheKey);
+
+        if (cached.HasValue)
+        {
+            if (cached == NullUserCacheValue)
+            {
+                return null;
+            }
+
+            var cachedUser = JsonSerializer.Deserialize<GameUser>(cached.ToString());
+            if (cachedUser is not null)
+            {
+                return cachedUser;
+            }
+        }
+
+        var user = await db.Queryable<GameUser>()
+            .Where(u => u.UserId == userId)
+            .FirstAsync();
+
+        if (user is null)
+        {
+            await CacheNullUserAsync(cacheKey);
+            return null;
+        }
+
+        await CacheUserAsync(user);
+        return user;
+    }
+
+    private async Task<GameUser?> GetUserByUsernameCachedAsync(string username)
+    {
+        var db1 = redis.GetDatabase();
+        var cacheKey = GetUserNameCacheKey(username);
+        var cached = await db1.StringGetAsync(cacheKey);
+
+        if (cached.HasValue)
+        {
+            if (cached == NullUserCacheValue)
+            {
+                return null;
+            }
+
+            var cachedUser = JsonSerializer.Deserialize<GameUser>(cached.ToString());
+            if (cachedUser is not null)
+            {
+                return cachedUser;
+            }
+        }
+
+        var user = await db.Queryable<GameUser>()
+            .Where(u => u.Username == username)
+            .FirstAsync();
+
+        if (user is null)
+        {
+            await CacheNullUserAsync(cacheKey);
+            return null;
+        }
+
+        await CacheUserAsync(user);
+        return user;
+    }
+
+    private async Task CacheUserAsync(GameUser user)
+    {
+        var database = redis.GetDatabase();
+        var payload = JsonSerializer.Serialize(user);
+
+        await database.StringSetAsync(GetUserByIdCacheKey(user.UserId), payload, UserCacheTtl);
+        await database.StringSetAsync(GetUserNameCacheKey(user.Username), payload, UserCacheTtl);
+    }
+
+    private async Task CacheNullUserAsync(string cacheKey)
+    {
+        var database = redis.GetDatabase();
+        await database.StringSetAsync(cacheKey, NullUserCacheValue, NotFoundUserTtl);
+    }
+    
+
+    private static string GetUserByIdCacheKey(Guid userId) => $"{UserIdCachePrefix}{userId}";
+
+    private static string GetUserNameCacheKey(string username) => $"{UserNameCachePrefix}{username}";
 }

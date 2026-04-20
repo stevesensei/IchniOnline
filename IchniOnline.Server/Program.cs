@@ -2,6 +2,7 @@ using System.Text;
 using IchniOnline.Server.Models.Options;
 using IchniOnline.Server.Service;
 using IchniOnline.Server.Service.Interface;
+using IchniOnline.Server.Service.Storage;
 using IchniOnline.Server.Utilities;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -22,7 +23,10 @@ builder.Services.AddDbContext(builder.Configuration,"MainDB");
 builder.AddRedisClient("cache");
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
+builder.Services.Configure<AliyunOssOptions>(builder.Configuration.GetSection(AliyunOssOptions.SectionName));
 builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IBeatmapService, BeatmapService>();
+builder.Services.AddScoped<IFileStorageService, AliyunOssStorageService>();
 
 builder.Services.AddAuthentication(options =>
 {
@@ -75,9 +79,9 @@ api.MapGet("weatherforecast", () =>
     .WithName("GetWeatherForecast");
 
 app.MapDefaultEndpoints();
-app.MapControllers();
 app.UseAuthentication();
 app.UseAuthorization();
+app.MapControllers();
 app.UseFileServer();
 
 app.Run();
