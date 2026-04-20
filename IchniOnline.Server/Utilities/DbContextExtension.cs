@@ -5,15 +5,37 @@ namespace IchniOnline.Server.Utilities;
 
 public static class DbContextExtension
 {
+    private static readonly string[] DefaultPreferredConnectionNames = ["MainDB", "IchniOnline"];
+
+    public static (string ConnectionName, string ConnectionString) ResolveConnection(IConfiguration configuration, params string[]? preferredConnectionNames)
+    {
+        var candidates = (preferredConnectionNames is { Length: > 0 }
+            ? preferredConnectionNames
+            : DefaultPreferredConnectionNames)
+            .Where(name => !string.IsNullOrWhiteSpace(name));
+
+        foreach (var candidate in candidates)
+        {
+            var connectionString = configuration.GetConnectionString(candidate);
+            if (!string.IsNullOrWhiteSpace(connectionString))
+            {
+                return (candidate, connectionString);
+            }
+        }
+
+        throw new InvalidOperationException($"缺少连接字符串，期望之一：{string.Join(", ", DefaultPreferredConnectionNames)}");
+    }
+
     public static IServiceCollection AddDbContext(
         this IServiceCollection services,
         IConfiguration configuration,
-        string connectionName = "platformAdminConnStr"
+        string? connectionName = null
     )
     {
-        var connectionString =
-            configuration.GetConnectionString(connectionName)
-            ?? throw new InvalidOperationException($"缺少连接字符串：{connectionName}");
+        var resolved = string.IsNullOrWhiteSpace(connectionName)
+            ? ResolveConnection(configuration)
+            : ResolveConnection(configuration, connectionName);
+        var connectionString = resolved.ConnectionString;
         services.AddScoped<ISqlSugarClient>(serviceProvider =>
         {
             // 优先复用 Program 中注册的 NpgsqlDataSource，继承 Aspire 官方 tracing / metrics

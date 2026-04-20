@@ -1,8 +1,15 @@
 var builder = DistributedApplication.CreateBuilder(args);
 //基础设施
-var postgres = builder.AddPostgres("MainDB");
+var postgres 
+    = builder.AddPostgres("MainDB")
+        .WithDataVolume(isReadOnly: false);
 var postgresdb = postgres.AddDatabase("IchniOnline");
-var cache = builder.AddValkey("cache");
+
+var cache = builder
+    .AddRedis("cache").WithDataVolume(isReadOnly: false).WithPersistence(
+        interval: TimeSpan.FromMinutes(5),
+        keysChangedThreshold: 100)
+    .WithLifetime(ContainerLifetime.Persistent);
 //后端
 var server = builder.AddProject<Projects.IchniOnline_Server>("server")
     .WithHttpHealthCheck("/health")

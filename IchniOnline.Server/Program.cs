@@ -18,20 +18,11 @@ builder.Services.AddProblemDetails();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
-var preferredConnectionNames = new[] { "MainDB", "IchniOnline" };
-var resolvedConnectionName = preferredConnectionNames.FirstOrDefault(name =>
-    !string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString(name)));
-
-if (resolvedConnectionName is null)
-{
-    throw new InvalidOperationException("No database connection string found. Expected one of: MainDB, IchniOnline.");
-}
-
-var resolvedConnectionString = builder.Configuration.GetConnectionString(resolvedConnectionName)!;
+var resolvedConnection = DbContextExtension.ResolveConnection(builder.Configuration, "MainDB", "IchniOnline");
 
 builder.Services.AddControllers();
-builder.Services.AddNpgsqlDataSource(resolvedConnectionString);
-builder.Services.AddDbContext(builder.Configuration, resolvedConnectionName);
+builder.Services.AddNpgsqlDataSource(resolvedConnection.ConnectionString);
+builder.Services.AddDbContext(builder.Configuration, resolvedConnection.ConnectionName);
 builder.AddRedisClient("cache");
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
@@ -78,8 +69,3 @@ app.MapControllers();
 app.UseFileServer();
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
