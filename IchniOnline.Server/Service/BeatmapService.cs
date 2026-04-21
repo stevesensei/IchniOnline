@@ -3,8 +3,13 @@ using IchniOnline.Server.Models.Dto;
 using SqlSugar;
 using StackExchange.Redis;
 using System.Text.Json;
+using IchniOnline.Server.Entities;
+using IchniOnline.Server.Mapper;
+using IchniOnline.Server.Models;
+using IchniOnline.Server.Models.Game;
 using IchniOnline.Server.Service.Interface;
 using IchniOnline.Server.Service.Storage;
+using IchniOnline.Server.Utilities;
 
 namespace IchniOnline.Server.Service;
 
@@ -38,7 +43,7 @@ public class BeatmapService(ISqlSugarClient db,
         if (string.IsNullOrWhiteSpace(beatmapDto.Composer))
             return Error.Validation("Beatmap.Composer", "Composer is required");
 
-        if (file is null || file.Length <= 0)
+        if (file.Length <= 0)
             return Error.Validation("Beatmap.IllustrateImage", "Illustrate image is required");
 
         var collectionId = Guid.CreateVersion7();
@@ -62,5 +67,81 @@ public class BeatmapService(ISqlSugarClient db,
 
         logger.LogInformation("Beatmap collection draft created and cached: {CollectionId}", collectionId);
         return collectionId.ToString();
+    }
+
+    public async Task<ErrorOr<string>> CreateBeatmap(BeatmapDivisionDto divisionDto, IFormFile levelData,
+        Guid collectionId)
+    {
+        //检查下输入合法性
+        if (string.IsNullOrWhiteSpace(divisionDto.LevelDesigner))
+            return Error.Validation("Beatmap.LevelDesigner", "Level designer is required");
+        if(string.IsNullOrWhiteSpace(divisionDto.Difficulty))
+            return Error.Validation("Beatmap.Difficulty", "Difficulty is required");
+        if(string.IsNullOrWhiteSpace(divisionDto.LevelColor))
+            return Error.Validation("Beatmap.LevelColor", "Level color is required");
+        if(levelData.Length <= 0)
+            return Error.Validation("Beatmap.LevelData", "Level data invalid");
+        //先检查数据库的collection数据，获取第一个使用此collectionId的谱面
+        var redisDb = redis.GetDatabase();
+        var existing = await db.Queryable<BeatmapDb>().FirstAsync(b => b.CollectionId == collectionId);
+        var dtoData = new BeatmapDto();
+        if (existing is null)
+        {
+            //检查缓存中是否有暂存的Collection
+            var cacheKey = $"{BeatmapCollectionCachePrefix}{collectionId}";
+            var dataSource =  await redisDb.StringGetAsync(cacheKey);
+            if (dataSource.IsNullOrEmpty)
+            {
+                //返回错误
+                return Error.NotFound("Beatmap collection not found");
+            }
+            dtoData = JsonSerializer.Deserialize<BeatmapDto>(dataSource.ToString())!;
+        }
+        else
+        {
+            //直接应用数据库内容
+            dtoData = new BeatmapDto
+            {
+                CollectionId = existing.CollectionId,
+                SongName = existing.SongName,
+                Illustrator = existing.Illustrator,
+                IllustrateUrl = existing.IllustrateUrl,
+                Composer = existing.Composer
+            };
+        }
+        //文件内容解码
+        using var ms = new MemoryStream();
+        await levelData.CopyToAsync(ms);
+        var hexContent = Convert.ToHexString(ms.ToArray());
+        var (beatmapRoot, _) = EasySaveUtils.DecryptJson<BeatmapRoot>("Soullies515", hexContent, true);
+        if (beatmapRoot is null)
+        {
+            return Error.Validation("Beatmap.LevelData", "Level data invalid");
+        }
+        var notes = BeatmapMapper.ToNoteDtos(beatmapRoot);
+        //将谱面Dto转换回BeatmapDb
+        var newData = new BeatmapDb()
+        {
+            BeatmapId = Guid.NewGuid(),
+            CollectionId = dtoData.CollectionId,
+            SongName = dtoData.SongName,
+            Illustrator = dtoData.Illustrator,
+            IllustrateUrl = dtoData.IllustrateUrl,
+            Composer = dtoData.Composer,
+            LevelDesigner = divisionDto.LevelDesigner,
+            Difficulty = divisionDto.Difficulty,
+            LevelColor = divisionDto.LevelColor,
+            Notes = notes,
+            //这俩等之后开发到再补全
+            ScheduledReleaseTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            Status = BeatmapStatus.Public
+        };
+        //传递到数据库
+        var result = await db.Insertable(newData).ExecuteCommandAsync();
+        if (result < 0)
+        {
+            return Error.Failure("Global.DatabaseError", "Failed to save beatmap to database");
+        }
+        return newData.BeatmapId.ToString();
     }
 }

@@ -6,7 +6,9 @@ var postgres
 var postgresdb = postgres.AddDatabase("IchniOnline");
 
 var cache = builder
-    .AddRedis("cache").WithDataVolume(isReadOnly: false).WithPersistence(
+    .AddRedis("cache")
+    .WithDataVolume(isReadOnly: false)
+    .WithPersistence(
         interval: TimeSpan.FromMinutes(5),
         keysChangedThreshold: 100)
     .WithLifetime(ContainerLifetime.Persistent);

@@ -6,6 +6,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <UserSecretsId>2f21cc43-9f53-4a3d-874c-359468bbb588</UserSecretsId>
+        <NoWarn>$(NoWarn);ASPIRECERTIFICATES001</NoWarn>
     </PropertyGroup>
 
     <ItemGroup>

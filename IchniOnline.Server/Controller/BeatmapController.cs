@@ -1,9 +1,7 @@
 using ErrorOr;
-using IchniOnline.Server.Models;
 using IchniOnline.Server.Models.Dto;
 using IchniOnline.Server.Models.Responses;
 using IchniOnline.Server.Service.Interface;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace IchniOnline.Server.Controller;
@@ -37,6 +35,33 @@ public class BeatmapController(IBeatmapService beatmapService): ControllerBase
 
         return result.Match(
             collectionId => GlobalResponse<string>.Ok(collectionId, "Beatmap collection draft created"),
+            ToErrorResponse<string>);
+    }
+
+    /// <summary>
+    /// 全新上传谱面
+    /// </summary>
+    /// <returns></returns>
+    [HttpPost("beatmap")]
+    [Consumes("multipart/form-data")]
+    public async Task<GlobalResponse<string>> CreateBeatmapAsync(
+        [FromForm]Guid collectionId,
+        [FromForm]string levelDesigner,
+        [FromForm]string difficulty,
+        [FromForm]string levelColor,
+        [FromForm]IFormFile levelData
+        )
+    {
+        var beatmapDivisionDto = new BeatmapDivisionDto()
+        {
+            LevelDesigner = levelDesigner,
+            Difficulty = difficulty,
+            LevelColor = levelColor
+        };
+        //call
+        var result = await beatmapService.CreateBeatmap(beatmapDivisionDto, levelData, collectionId);
+        return result.Match(
+            beatmapId => GlobalResponse<string>.Ok(beatmapId, "Beatmap created"),
             ToErrorResponse<string>);
     }
 
