@@ -1,6 +1,6 @@
 using ErrorOr;
+using IchniOnline.Server.Data;
 using IchniOnline.Server.Models.Dto;
-using SqlSugar;
 using StackExchange.Redis;
 using System.Text.Json;
 using IchniOnline.Server.Entities;
@@ -10,13 +10,14 @@ using IchniOnline.Server.Models.Game;
 using IchniOnline.Server.Service.Interface;
 using IchniOnline.Server.Service.Storage;
 using IchniOnline.Server.Utilities;
+using Microsoft.EntityFrameworkCore;
 
 namespace IchniOnline.Server.Service;
 
 /// <summary>
 /// 谱面服务
 /// </summary>
-public class BeatmapService(ISqlSugarClient db,
+public class BeatmapService(AppDbContext db,
     IConnectionMultiplexer redis,
     IFileStorageService fileStorageService,
     ILogger<BeatmapService> logger) : IBeatmapService
@@ -83,7 +84,9 @@ public class BeatmapService(ISqlSugarClient db,
             return Error.Validation("Beatmap.LevelData", "Level data invalid");
         //先检查数据库的collection数据，获取第一个使用此collectionId的谱面
         var redisDb = redis.GetDatabase();
-        var existing = await db.Queryable<BeatmapDb>().FirstAsync(b => b.CollectionId == collectionId);
+        var existing = await db.Beatmaps
+            .AsNoTracking()
+            .FirstOrDefaultAsync(b => b.CollectionId == collectionId);
         var dtoData = new BeatmapDto();
         if (existing is null)
         {
@@ -137,8 +140,9 @@ public class BeatmapService(ISqlSugarClient db,
             Status = BeatmapStatus.Public
         };
         //传递到数据库
-        var result = await db.Insertable(newData).ExecuteCommandAsync();
-        if (result < 0)
+        db.Beatmaps.Add(newData);
+        var result = await db.SaveChangesAsync();
+        if (result <= 0)
         {
             return Error.Failure("Global.DatabaseError", "Failed to save beatmap to database");
         }

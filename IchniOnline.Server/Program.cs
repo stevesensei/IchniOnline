@@ -1,10 +1,11 @@
 using System.Text;
+using IchniOnline.Server.Data;
 using IchniOnline.Server.Models.Options;
 using IchniOnline.Server.Service;
 using IchniOnline.Server.Service.Interface;
 using IchniOnline.Server.Service.Storage;
-using IchniOnline.Server.Utilities;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,12 +19,9 @@ builder.Services.AddProblemDetails();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
-var resolvedConnection = DbContextExtension.ResolveConnection(builder.Configuration, "MainDB", "IchniOnline");
-
 builder.Services.AddControllers();
-builder.Services.AddNpgsqlDataSource(resolvedConnection.ConnectionString);
-builder.Services.AddDbContext(builder.Configuration, resolvedConnection.ConnectionName);
 builder.AddRedisClient("cache");
+builder.AddNpgsqlDbContext<AppDbContext>("IchniOnline");
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<AliyunOssOptions>(builder.Configuration.GetSection(AliyunOssOptions.SectionName));
@@ -53,6 +51,12 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await dbContext.Database.MigrateAsync();
+}
 
 // Configure the HTTP request pipeline.
 app.UseExceptionHandler();

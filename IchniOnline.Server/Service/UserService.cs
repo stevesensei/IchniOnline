@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using ErrorOr;
+using IchniOnline.Server.Data;
 using IchniOnline.Server.Entities;
 using IchniOnline.Server.Models;
 using IchniOnline.Server.Models.Dto;
@@ -10,16 +11,16 @@ using IchniOnline.Server.Models.Options;
 using IchniOnline.Server.Models.Requests;
 using IchniOnline.Server.Models.Responses;
 using IchniOnline.Server.Service.Interface;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-using SqlSugar;
 using StackExchange.Redis;
 using System.Text.Json;
 
 namespace IchniOnline.Server.Service;
 
 public class UserService(
-    ISqlSugarClient db,
+    AppDbContext db,
     IConnectionMultiplexer redis,
     IOptions<JwtOptions> jwtOptions,
     ILogger<UserService> logger)
@@ -116,7 +117,8 @@ public class UserService(
             Permission = UserPermission.Player
         };
 
-        await db.Insertable(newUser).ExecuteCommandAsync();
+        db.GameUsers.Add(newUser);
+        await db.SaveChangesAsync();
         await CacheUserAsync(newUser);
 
         logger.LogInformation("New user registered: {Username}", request.Username);
@@ -160,7 +162,8 @@ public class UserService(
         if (avatarUrl is not null)
             user.AvatarUrl = avatarUrl;
 
-        await db.Updateable(user).ExecuteCommandAsync();
+        db.GameUsers.Update(user);
+        await db.SaveChangesAsync();
         await CacheUserAsync(user);
 
         logger.LogInformation("User updated: {UserId}", userId);
@@ -182,9 +185,8 @@ public class UserService(
             return Error.NotFound("User not found");
         }
 
-        await db.Deleteable<GameUser>()
-            .Where(u => u.UserId == userId)
-            .ExecuteCommandAsync();
+        db.GameUsers.Remove(user);
+        await db.SaveChangesAsync();
 
         await CacheNullUserAsync(GetUserByIdCacheKey(userId));
         await CacheNullUserAsync(GetUserNameCacheKey(user.Username));
@@ -250,9 +252,9 @@ public class UserService(
             }
         }
 
-        var user = await db.Queryable<GameUser>()
-            .Where(u => u.UserId == userId)
-            .FirstAsync();
+        var user = await db.GameUsers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.UserId == userId);
 
         if (user is null)
         {
@@ -284,9 +286,9 @@ public class UserService(
             }
         }
 
-        var user = await db.Queryable<GameUser>()
-            .Where(u => u.Username == username)
-            .FirstAsync();
+        var user = await db.GameUsers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Username == username);
 
         if (user is null)
         {
