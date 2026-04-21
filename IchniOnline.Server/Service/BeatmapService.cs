@@ -24,6 +24,7 @@ public class BeatmapService(AppDbContext db,
 {
     private const string BeatmapCollectionCachePrefix = "beatmap:collection:draft@";
     private const string BeatmapCachePrefix = "beatmap:collection@";
+    private const double ChartBucketSizeSeconds = 10d;
     private static readonly TimeSpan BeatmapCollectionCacheTtl = TimeSpan.FromMinutes(10);
 
     /// <summary>
@@ -225,57 +226,63 @@ public class BeatmapService(AppDbContext db,
     /// <returns></returns>
     public async Task<ErrorOr<List<BeatmapNoteChartComponent>>> GetBeatmapChart(Guid beatmapGuid)
     {
-        //获取collectionId
-        var collectionId = db.Beatmaps.AsNoTracking()
-            .Where(b => b.BeatmapId == beatmapGuid)
-            .Select(b => b.CollectionId)
-            .FirstOrDefault();
-        if (collectionId == Guid.Empty)
+        if (beatmapGuid == Guid.Empty)
         {
-            return Error.NotFound("Beatmap.NotFound", "Beatmap not found");
-        }
-        //获取谱面数据
-        var res = await GetBeatmapFromCollection(collectionId);
-        if (res.IsError)
-        {
-            return Error.Failure(res.Errors.First().Code, res.Errors.First().Description);
-        }
-        var beatmap = res.Value.FirstOrDefault(x => x.BeatmapId == beatmapGuid);
-        if (beatmap == null)
-        {
-            return Error.NotFound("Beatmap.NotFound", "Beatmap not found");
+            return Error.Validation("Beatmap.BeatmapId", "Beatmap id is required");
         }
 
-        var charts = new List<BeatmapNoteChartComponent>()
+        try
         {
-            new()            {
-                From = 0,
-                To = 10,
-                Count = 0
-            }
-        };
-        foreach (var note in beatmap.Notes)
-        {
-            var targetComp = charts.FirstOrDefault(c => c.From <= note.JudgeTime && c.To > note.JudgeTime);
-            if (targetComp == null)
+            var beatmap = await db.Beatmaps
+                .AsNoTracking()
+                .Where(b => b.BeatmapId == beatmapGuid)
+                .Select(b => new { b.Notes })
+                .FirstOrDefaultAsync();
+
+            if (beatmap is null)
             {
-                //循环创建
-                while (charts.Max(x => x.From) < note.JudgeTime)
+                return Error.NotFound("Beatmap.NotFound", "Beatmap not found");
+            }
+
+            return BuildNoteChart(beatmap.Notes);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to build beatmap chart for {BeatmapId}", beatmapGuid);
+            return Error.Failure("Global.DatabaseError", "Failed to build beatmap chart");
+        }
+    }
+
+    private static List<BeatmapNoteChartComponent> BuildNoteChart(List<BeatmapNoteDto>? notes)
+    {
+        var bucketCounts = new Dictionary<int, long>();
+
+        if (notes is not null)
+        {
+            foreach (var note in notes)
+            {
+                if (double.IsNaN(note.JudgeTime) || double.IsInfinity(note.JudgeTime))
                 {
-                    charts.Add(new BeatmapNoteChartComponent()
-                    {
-                        From = charts.Max(x => x.From) + 10,
-                        To = charts.Max(x => x.To) + 10,
-                        Count = 0
-                    });
+                    continue;
                 }
-                targetComp = charts.FirstOrDefault(c => c.From <= note.JudgeTime && c.To > note.JudgeTime);
-                targetComp.Count++;
+
+                var normalizedTime = Math.Max(0d, note.JudgeTime);
+                var bucketIndex = (int)Math.Floor(normalizedTime / ChartBucketSizeSeconds);
+                bucketCounts[bucketIndex] = bucketCounts.GetValueOrDefault(bucketIndex) + 1;
             }
-            else
+        }
+
+        var maxBucketIndex = bucketCounts.Count == 0 ? 0 : bucketCounts.Keys.Max();
+        var charts = new List<BeatmapNoteChartComponent>(maxBucketIndex + 1);
+
+        for (var i = 0; i <= maxBucketIndex; i++)
+        {
+            charts.Add(new BeatmapNoteChartComponent
             {
-                targetComp.Count++;
-            }
+                From = i * ChartBucketSizeSeconds,
+                To = (i + 1) * ChartBucketSizeSeconds,
+                Count = bucketCounts.GetValueOrDefault(i)
+            });
         }
 
         return charts;

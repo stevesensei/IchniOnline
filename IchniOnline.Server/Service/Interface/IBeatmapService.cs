@@ -9,5 +9,9 @@ public interface IBeatmapService
 
     Task<ErrorOr<string>> CreateBeatmap(BeatmapDivisionDto divisionDto, IFormFile levelData,
         Guid collectionId);
+
+    Task<ErrorOr<BeatmapDto>> GetBeatmapCollection(Guid collectionId, bool availableOnly);
+
+    Task<ErrorOr<List<BeatmapNoteChartComponent>>> GetBeatmapChart(Guid beatmapGuid);
 }
 

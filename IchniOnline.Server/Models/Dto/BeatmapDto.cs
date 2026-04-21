@@ -20,16 +20,16 @@ public class BeatmapDto
     [JsonPropertyName("composer")]
     public string Composer { get; set; } = null!;
     [JsonPropertyName("difficulties")]
-    public List<BeatmapDivisionDto> Divisions = new();
+    public List<BeatmapDivisionDto> Divisions { get; set; }= null!;
 }
 
 /// <summary>
 /// 谱面差分
 /// </summary>
+[Serializable]
 public class BeatmapDivisionDto
 {
     [JsonPropertyName("beatmap_id")]
-    public Guid Id { get; set; }
     public Guid BeatmapId { get; set; }
     [JsonPropertyName("designer")]
     public string LevelDesigner { get; set; } = null!;
@@ -39,6 +39,7 @@ public class BeatmapDivisionDto
     public string LevelColor { get; set; } = null!;
 }
 
+[Serializable]
 public class BeatmapNoteChartComponent
 {
     [JsonPropertyName("from")]

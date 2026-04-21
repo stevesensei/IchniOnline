@@ -65,6 +65,35 @@ public class BeatmapController(IBeatmapService beatmapService): ControllerBase
             ToErrorResponse<string>);
     }
 
+    /// <summary>
+    /// 获取谱面合集
+    /// </summary>
+    [HttpGet("collection/{collectionId:guid}")]
+    public async Task<GlobalResponse<BeatmapDto>> GetBeatmapCollectionAsync(
+        [FromRoute] Guid collectionId,
+        [FromQuery] bool availableOnly = true)
+    {
+        var result = await beatmapService.GetBeatmapCollection(collectionId, availableOnly);
+
+        return result.Match(
+            beatmap => GlobalResponse<BeatmapDto>.Ok(beatmap, "Beatmap collection retrieved"),
+            ToErrorResponse<BeatmapDto>);
+    }
+
+    /// <summary>
+    /// 获取谱面 note 柱状图
+    /// </summary>
+    [HttpGet("chart/{beatmapId:guid}")]
+    public async Task<GlobalResponse<List<BeatmapNoteChartComponent>>> GetBeatmapChartAsync(
+        [FromRoute] Guid beatmapId)
+    {
+        var result = await beatmapService.GetBeatmapChart(beatmapId);
+
+        return result.Match(
+            charts => GlobalResponse<List<BeatmapNoteChartComponent>>.Ok(charts, "Beatmap chart retrieved"),
+            ToErrorResponse<List<BeatmapNoteChartComponent>>);
+    }
+
     [NonAction]
     private static GlobalResponse<T> ToErrorResponse<T>(List<Error> errors)
     {
