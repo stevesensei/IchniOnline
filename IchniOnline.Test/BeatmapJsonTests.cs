@@ -348,4 +348,49 @@ public class BeatmapJsonTests
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() => BeatmapMapper.ToNoteDtos(null!));
     }
+
+    [Test]
+    public void Deserialize_BeatmapRoot_WithNumericType_ParsesCorrectly()
+    {
+        // Arrange
+        var json = """
+        {
+            "Beatmap": {
+                "__type": 1,
+                "value": {
+                    "elementList": [
+                        {
+                            "__type": 6,
+                            "exactJudgeTime": 16.17,
+                            "elementName": "Stay (16.17)",
+                            "tags": [],
+                            "elementGuid": {
+                                "value": "c0a7832d-9d10-4d32-abf6-ca17409aab69"
+                            }
+                        },
+                        {
+                            "__type": 3,
+                            "exactJudgeTime": 49.7200623,
+                            "elementName": "Tap (49.72006)",
+                            "tags": [],
+                            "elementGuid": {
+                                "value": "b78202fe-d502-482f-9d61-268585b7ce9b"
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+        """;
+
+        // Act
+        var beatmapRoot = JsonSerializer.Deserialize<BeatmapRoot>(json, JsonOptions);
+
+        // Assert
+        Assert.That(beatmapRoot, Is.Not.Null);
+        Assert.That(beatmapRoot!.Beatmap.SaveDataType, Is.EqualTo(SaveDataType.BeatmapContainer));
+        Assert.That(beatmapRoot.Beatmap.Value.Elements.Count, Is.EqualTo(2));
+        Assert.That(beatmapRoot.Beatmap.Value.Elements[0], Is.InstanceOf<StayElement>());
+        Assert.That(beatmapRoot.Beatmap.Value.Elements[1], Is.InstanceOf<TapElement>());
+    }
 }

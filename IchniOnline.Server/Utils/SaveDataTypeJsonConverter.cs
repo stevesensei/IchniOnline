@@ -28,12 +28,27 @@ public class SaveDataTypeJsonConverter : JsonConverter<SaveDataType>
 
     public override SaveDataType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        if (reader.TokenType != JsonTokenType.String)
+        if (reader.TokenType == JsonTokenType.Number)
         {
-            throw new JsonException($"Expected string for SaveDataType, got {reader.TokenType}");
+            if (!reader.TryGetInt32(out var intValue))
+                throw new JsonException("Invalid numeric value for SaveDataType");
+
+            return Enum.IsDefined(typeof(SaveDataType), intValue)
+                ? (SaveDataType)intValue
+                : SaveDataType.None;
         }
 
+        if (reader.TokenType != JsonTokenType.String)
+            throw new JsonException($"Expected string or number for SaveDataType, got {reader.TokenType}");
+
         var value = reader.GetString()!;
+        if (int.TryParse(value, out var parsedInt))
+        {
+            return Enum.IsDefined(typeof(SaveDataType), parsedInt)
+                ? (SaveDataType)parsedInt
+                : SaveDataType.None;
+        }
+
         return StringToEnum.TryGetValue(value, out var result)
             ? result
             : SaveDataType.None;

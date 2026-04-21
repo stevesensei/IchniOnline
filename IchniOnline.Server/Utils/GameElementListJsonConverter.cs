@@ -15,6 +15,14 @@ public class GameElementListJsonConverter : JsonConverterFactory
         { "Ichni.RhythmGame.Beatmap.Stay_BM,Assembly-CSharp", typeof(StayElement) },
     };
 
+    private static readonly Dictionary<SaveDataType, Type> EnumTypeMap = new()
+    {
+        { SaveDataType.Tap, typeof(TapElement) },
+        { SaveDataType.Flick, typeof(FlickElement) },
+        { SaveDataType.Hold, typeof(HoldElement) },
+        { SaveDataType.Stay, typeof(StayElement) },
+    };
+
     public override bool CanConvert(Type typeToConvert)
         => typeToConvert.IsGenericType
            && typeToConvert.GetGenericTypeDefinition() == typeof(List<>)
@@ -45,8 +53,7 @@ public class GameElementListJsonConverter : JsonConverterFactory
                     if (!root.TryGetProperty("__type", out var typeProperty))
                         continue;
 
-                    var typeValue = typeProperty.GetString();
-                    if (string.IsNullOrEmpty(typeValue) || !TypeMap.TryGetValue(typeValue, out var elementType))
+                    if (!TryResolveElementType(typeProperty, out var elementType))
                         continue; // Skip unknown element types
 
                     var json = root.GetRawText();
@@ -61,5 +68,24 @@ public class GameElementListJsonConverter : JsonConverterFactory
 
         public override void Write(Utf8JsonWriter writer, List<GameElement> value, JsonSerializerOptions options)
             => JsonSerializer.Serialize(writer, value, options);
+
+        private static bool TryResolveElementType(JsonElement typeProperty, out Type? elementType)
+        {
+            elementType = null;
+
+            if (typeProperty.ValueKind == JsonValueKind.String)
+            {
+                var typeValue = typeProperty.GetString();
+                return !string.IsNullOrEmpty(typeValue) && TypeMap.TryGetValue(typeValue, out elementType);
+            }
+
+            if (typeProperty.ValueKind == JsonValueKind.Number && typeProperty.TryGetInt32(out var typeNumber))
+            {
+                var saveDataType = (SaveDataType)typeNumber;
+                return EnumTypeMap.TryGetValue(saveDataType, out elementType);
+            }
+
+            return false;
+        }
     }
 }

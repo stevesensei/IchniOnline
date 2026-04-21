@@ -88,15 +88,15 @@ public class BeatmapService(AppDbContext db,
             .AsNoTracking()
             .FirstOrDefaultAsync(b => b.CollectionId == collectionId);
         var dtoData = new BeatmapDto();
+        var cacheKey = $"{BeatmapCollectionCachePrefix}{collectionId}";
         if (existing is null)
         {
             //检查缓存中是否有暂存的Collection
-            var cacheKey = $"{BeatmapCollectionCachePrefix}{collectionId}";
             var dataSource =  await redisDb.StringGetAsync(cacheKey);
             if (dataSource.IsNullOrEmpty)
             {
                 //返回错误
-                return Error.NotFound("Beatmap collection not found");
+                return Error.NotFound("Beatmap.CollectionDraftNotFound", "Beatmap collection draft not found");
             }
             dtoData = JsonSerializer.Deserialize<BeatmapDto>(dataSource.ToString())!;
         }
@@ -146,6 +146,8 @@ public class BeatmapService(AppDbContext db,
         {
             return Error.Failure("Global.DatabaseError", "Failed to save beatmap to database");
         }
+        //删除暂存
+        await redisDb.KeyDeleteAsync(cacheKey);
         return newData.BeatmapId.ToString();
     }
 }
