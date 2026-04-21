@@ -22,7 +22,8 @@ public class BeatmapService(AppDbContext db,
     IFileStorageService fileStorageService,
     ILogger<BeatmapService> logger) : IBeatmapService
 {
-    private const string BeatmapCollectionCachePrefix = "beatmap:collection:draft:";
+    private const string BeatmapCollectionCachePrefix = "beatmap:collection:draft@";
+    private const string BeatmapCachePrefix = "beatmap:collection@";
     private static readonly TimeSpan BeatmapCollectionCacheTtl = TimeSpan.FromMinutes(10);
 
     /// <summary>
@@ -59,7 +60,6 @@ public class BeatmapService(AppDbContext db,
         await using var stream = file.OpenReadStream();
         var uploadResult = await fileStorageService.UploadAsync(stream, objectFileName, file.ContentType);
         beatmapDto.IllustrateUrl = fileStorageService.GetFileUrl(uploadResult.FileName);
-
         var redisDb = redis.GetDatabase();
         var cacheKey = $"{BeatmapCollectionCachePrefix}{collectionId}";
         var payload = JsonSerializer.Serialize(beatmapDto);
@@ -149,5 +149,135 @@ public class BeatmapService(AppDbContext db,
         //删除暂存
         await redisDb.KeyDeleteAsync(cacheKey);
         return newData.BeatmapId.ToString();
+    }
+
+    /// <summary>
+    /// 获取合集
+    /// </summary>
+    /// <returns></returns>
+    public async Task<ErrorOr<BeatmapDto>> GetBeatmapCollection(Guid collectionId,bool availableOnly)
+    {
+        List<BeatmapDb> results = new();
+        try
+        {
+            var res = await GetBeatmapFromCollection(collectionId);
+            if (res.IsError)
+            {
+                return Error.Failure(res.Errors.First().Code, res.Errors.First().Description);
+            }
+            results = res.Value;
+        }
+        catch (Exception e)
+        {
+            return Error.Failure("Global.DatabaseError", $"Failed to retrieve beatmap collection: {e.Message}");
+        }
+
+        if (availableOnly)
+        {
+            results = results.Where(b => b.Status == BeatmapStatus.Public).ToList();
+        }
+        //转换到Dto
+        var beatmapDivisionDtos = results.Select(b => new BeatmapDivisionDto()
+        {
+            BeatmapId = b.BeatmapId,
+            Difficulty = b.Difficulty,
+            LevelColor = b.LevelColor,
+            LevelDesigner = b.LevelDesigner
+        }).ToList();
+        var beatmapDto = results.Select(b => new BeatmapDto()
+        {
+            CollectionId = b.CollectionId,
+            SongName = b.SongName,
+            Illustrator = b.Illustrator,
+            IllustrateUrl = b.IllustrateUrl,
+            Composer = b.Composer,
+            Divisions = beatmapDivisionDtos
+        }).First();
+        return beatmapDto;
+    }
+    
+    private async Task<ErrorOr<List<BeatmapDb>>> GetBeatmapFromCollection(Guid collectionId)
+    {
+        List<BeatmapDb> results = new();
+        var redisDb = redis.GetDatabase();
+        if (redisDb.KeyExists($"{BeatmapCollectionCachePrefix}{collectionId}"))
+        {
+            results =
+                JsonSerializer.Deserialize<List<BeatmapDb>>(
+                    redisDb.StringGet($"{BeatmapCollectionCachePrefix}{collectionId}").ToString()) ?? new();
+        }
+        else
+        {
+            results = await db.Beatmaps
+                .AsNoTracking()
+                .Where(b => b.CollectionId == collectionId)
+                .ToListAsync();
+            //写缓存
+            await redisDb.StringSetAsync($"{BeatmapCollectionCachePrefix}{collectionId}",
+                JsonSerializer.Serialize(results), BeatmapCollectionCacheTtl);
+        }
+        return results;
+    }
+
+    /// <summary>
+    /// 获取note柱状图
+    /// </summary>
+    /// <returns></returns>
+    public async Task<ErrorOr<List<BeatmapNoteChartComponent>>> GetBeatmapChart(Guid beatmapGuid)
+    {
+        //获取collectionId
+        var collectionId = db.Beatmaps.AsNoTracking()
+            .Where(b => b.BeatmapId == beatmapGuid)
+            .Select(b => b.CollectionId)
+            .FirstOrDefault();
+        if (collectionId == Guid.Empty)
+        {
+            return Error.NotFound("Beatmap.NotFound", "Beatmap not found");
+        }
+        //获取谱面数据
+        var res = await GetBeatmapFromCollection(collectionId);
+        if (res.IsError)
+        {
+            return Error.Failure(res.Errors.First().Code, res.Errors.First().Description);
+        }
+        var beatmap = res.Value.FirstOrDefault(x => x.BeatmapId == beatmapGuid);
+        if (beatmap == null)
+        {
+            return Error.NotFound("Beatmap.NotFound", "Beatmap not found");
+        }
+
+        var charts = new List<BeatmapNoteChartComponent>()
+        {
+            new()            {
+                From = 0,
+                To = 10,
+                Count = 0
+            }
+        };
+        foreach (var note in beatmap.Notes)
+        {
+            var targetComp = charts.FirstOrDefault(c => c.From <= note.JudgeTime && c.To > note.JudgeTime);
+            if (targetComp == null)
+            {
+                //循环创建
+                while (charts.Max(x => x.From) < note.JudgeTime)
+                {
+                    charts.Add(new BeatmapNoteChartComponent()
+                    {
+                        From = charts.Max(x => x.From) + 10,
+                        To = charts.Max(x => x.To) + 10,
+                        Count = 0
+                    });
+                }
+                targetComp = charts.FirstOrDefault(c => c.From <= note.JudgeTime && c.To > note.JudgeTime);
+                targetComp.Count++;
+            }
+            else
+            {
+                targetComp.Count++;
+            }
+        }
+
+        return charts;
     }
 }
