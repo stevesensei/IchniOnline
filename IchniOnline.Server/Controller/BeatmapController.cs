@@ -81,6 +81,22 @@ public class BeatmapController(IBeatmapService beatmapService): ControllerBase
     }
 
     /// <summary>
+    /// 分页获取谱面合集
+    /// </summary>
+    [HttpGet("collections")]
+    public async Task<GlobalResponse<BeatmapPagedDto>> GetBeatmapCollectionsPageAsync(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] bool availableOnly = true)
+    {
+        var result = await beatmapService.GetBeatmapCollectionsPage(page, pageSize, availableOnly);
+
+        return result.Match(
+            paged => GlobalResponse<BeatmapPagedDto>.Ok(paged, "Beatmap collections retrieved"),
+            ToErrorResponse<BeatmapPagedDto>);
+    }
+
+    /// <summary>
     /// 获取谱面 note 柱状图
     /// </summary>
     [HttpGet("chart/{beatmapId:guid}")]

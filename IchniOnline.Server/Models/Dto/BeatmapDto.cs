@@ -23,6 +23,36 @@ public class BeatmapDto
     public List<BeatmapDivisionDto> Divisions { get; set; }= null!;
 }
 
+public class BeatmapListItemDto
+{
+    [JsonPropertyName("id")]
+    public Guid CollectionId { get; set; }
+    [JsonPropertyName("name")]
+    public string SongName { get; set; } = null!;
+    [JsonPropertyName("url")]
+    public string IllustrateUrl { get; set; } = null!;
+    [JsonPropertyName("illustrator")]
+    public string Illustrator { get; set; } = null!;
+    [JsonPropertyName("composer")]
+    public string Composer { get; set; } = null!;
+    [JsonPropertyName("difficulties")]
+    public List<BeatmapDivisionDto> Divisions { get; set; } = new();
+}
+
+public class BeatmapPagedDto
+{
+    [JsonPropertyName("page")]
+    public int Page { get; set; }
+    [JsonPropertyName("page_size")]
+    public int PageSize { get; set; }
+    [JsonPropertyName("total")]
+    public int Total { get; set; }
+    [JsonPropertyName("total_pages")]
+    public int TotalPages { get; set; }
+    [JsonPropertyName("items")]
+    public List<BeatmapListItemDto> Items { get; set; } = new();
+}
+
 /// <summary>
 /// 谱面差分
 /// </summary>

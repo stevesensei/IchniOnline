@@ -22,10 +22,13 @@ public class BeatmapService(AppDbContext db,
     IFileStorageService fileStorageService,
     ILogger<BeatmapService> logger) : IBeatmapService
 {
-    private const string BeatmapCollectionCachePrefix = "beatmap:collection:draft@";
-    private const string BeatmapCachePrefix = "beatmap:collection@";
+    private const string BeatmapCollectionDraftCachePrefix = "beatmap:collection:draft@";
+    private const string BeatmapCollectionDetailCachePrefix = "beatmap:collection:detail@";
+    private const string BeatmapCollectionIdsCachePrefix = "beatmap:collection:ids@";
     private const double ChartBucketSizeSeconds = 10d;
-    private static readonly TimeSpan BeatmapCollectionCacheTtl = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan BeatmapCollectionDraftCacheTtl = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan BeatmapCollectionDetailCacheTtl = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan BeatmapCollectionIdsCacheTtl = TimeSpan.FromMinutes(1);
 
     /// <summary>
     /// 由于没有Collection对应的表，所以需要先将其校验后创建到缓存内
@@ -62,10 +65,10 @@ public class BeatmapService(AppDbContext db,
         var uploadResult = await fileStorageService.UploadAsync(stream, objectFileName, file.ContentType);
         beatmapDto.IllustrateUrl = fileStorageService.GetFileUrl(uploadResult.FileName);
         var redisDb = redis.GetDatabase();
-        var cacheKey = $"{BeatmapCollectionCachePrefix}{collectionId}";
+        var cacheKey = $"{BeatmapCollectionDraftCachePrefix}{collectionId}";
         var payload = JsonSerializer.Serialize(beatmapDto);
 
-        await redisDb.StringSetAsync(cacheKey, payload, BeatmapCollectionCacheTtl);
+        await redisDb.StringSetAsync(cacheKey, payload, BeatmapCollectionDraftCacheTtl);
 
         logger.LogInformation("Beatmap collection draft created and cached: {CollectionId}", collectionId);
         return collectionId.ToString();
@@ -88,8 +91,8 @@ public class BeatmapService(AppDbContext db,
         var existing = await db.Beatmaps
             .AsNoTracking()
             .FirstOrDefaultAsync(b => b.CollectionId == collectionId);
-        var dtoData = new BeatmapDto();
-        var cacheKey = $"{BeatmapCollectionCachePrefix}{collectionId}";
+        BeatmapDto dtoData;
+        var cacheKey = $"{BeatmapCollectionDraftCachePrefix}{collectionId}";
         if (existing is null)
         {
             //检查缓存中是否有暂存的Collection
@@ -149,6 +152,7 @@ public class BeatmapService(AppDbContext db,
         }
         //删除暂存
         await redisDb.KeyDeleteAsync(cacheKey);
+        await InvalidateCollectionCachesAsync(collectionId);
         return newData.BeatmapId.ToString();
     }
 
@@ -158,25 +162,47 @@ public class BeatmapService(AppDbContext db,
     /// <returns></returns>
     public async Task<ErrorOr<BeatmapDto>> GetBeatmapCollection(Guid collectionId,bool availableOnly)
     {
-        List<BeatmapDb> results = new();
+        if (collectionId == Guid.Empty)
+        {
+            return Error.Validation("Beatmap.CollectionId", "Collection id is required");
+        }
+
+        var redisDb = redis.GetDatabase();
+        var cacheKey = BuildCollectionCacheKey(collectionId, availableOnly);
+        var cachedCollectionPayload = await redisDb.StringGetAsync(cacheKey);
+        if (!cachedCollectionPayload.IsNullOrEmpty)
+        {
+            var cachedCollection = JsonSerializer.Deserialize<BeatmapDto>(cachedCollectionPayload.ToString());
+            if (cachedCollection is not null)
+            {
+                return cachedCollection;
+            }
+        }
+
+        List<BeatmapDb> results;
         try
         {
-            var res = await GetBeatmapFromCollection(collectionId);
-            if (res.IsError)
+            var query = db.Beatmaps
+                .AsNoTracking()
+                .Where(b => b.CollectionId == collectionId);
+
+            if (availableOnly)
             {
-                return Error.Failure(res.Errors.First().Code, res.Errors.First().Description);
+                query = query.Where(b => b.Status == BeatmapStatus.Public);
             }
-            results = res.Value;
+
+            results = await query.ToListAsync();
         }
         catch (Exception e)
         {
             return Error.Failure("Global.DatabaseError", $"Failed to retrieve beatmap collection: {e.Message}");
         }
 
-        if (availableOnly)
+        if (results.Count == 0)
         {
-            results = results.Where(b => b.Status == BeatmapStatus.Public).ToList();
+            return Error.NotFound("Beatmap.CollectionNotFound", "Beatmap collection not found");
         }
+
         //转换到Dto
         var beatmapDivisionDtos = results.Select(b => new BeatmapDivisionDto()
         {
@@ -194,30 +220,113 @@ public class BeatmapService(AppDbContext db,
             Composer = b.Composer,
             Divisions = beatmapDivisionDtos
         }).First();
+
+        await redisDb.StringSetAsync(cacheKey, JsonSerializer.Serialize(beatmapDto), BeatmapCollectionDetailCacheTtl);
         return beatmapDto;
     }
-    
-    private async Task<ErrorOr<List<BeatmapDb>>> GetBeatmapFromCollection(Guid collectionId)
+
+    public async Task<ErrorOr<BeatmapPagedDto>> GetBeatmapCollectionsPage(int page, int pageSize, bool availableOnly)
     {
-        List<BeatmapDb> results = new();
+        var normalizedPage = Math.Max(page, 1);
+        var normalizedPageSize = Math.Clamp(pageSize, 1, 50);
         var redisDb = redis.GetDatabase();
-        if (redisDb.KeyExists($"{BeatmapCollectionCachePrefix}{collectionId}"))
+        var collectionIdsCacheKey = BuildCollectionIdsCacheKey(availableOnly);
+
+        List<Guid>? collectionIds = null;
+        var cachedIdsPayload = await redisDb.StringGetAsync(collectionIdsCacheKey);
+        if (!cachedIdsPayload.IsNullOrEmpty)
         {
-            results =
-                JsonSerializer.Deserialize<List<BeatmapDb>>(
-                    redisDb.StringGet($"{BeatmapCollectionCachePrefix}{collectionId}").ToString()) ?? new();
+            collectionIds = JsonSerializer.Deserialize<List<Guid>>(cachedIdsPayload.ToString());
         }
-        else
+
+        try
         {
-            results = await db.Beatmaps
+            var query = db.Beatmaps
                 .AsNoTracking()
-                .Where(b => b.CollectionId == collectionId)
-                .ToListAsync();
-            //写缓存
-            await redisDb.StringSetAsync($"{BeatmapCollectionCachePrefix}{collectionId}",
-                JsonSerializer.Serialize(results), BeatmapCollectionCacheTtl);
+                .AsQueryable();
+
+            if (availableOnly)
+            {
+                query = query.Where(b => b.Status == BeatmapStatus.Public);
+            }
+
+            if (collectionIds is null)
+            {
+                collectionIds = await query
+                    .GroupBy(b => b.CollectionId)
+                    .Select(g => new
+                    {
+                        CollectionId = g.Key,
+                        LatestReleaseTime = g.Max(x => x.ScheduledReleaseTime)
+                    })
+                    .OrderByDescending(x => x.LatestReleaseTime)
+                    .ThenBy(x => x.CollectionId)
+                    .Select(x => x.CollectionId)
+                    .ToListAsync();
+
+                await redisDb.StringSetAsync(collectionIdsCacheKey,
+                    JsonSerializer.Serialize(collectionIds), BeatmapCollectionIdsCacheTtl);
+            }
+
+            var total = collectionIds.Count;
+
+            var skip = (normalizedPage - 1) * normalizedPageSize;
+            var pagedCollectionIds = collectionIds
+                .Skip(skip)
+                .Take(normalizedPageSize)
+                .ToList();
+
+            var pageRows = pagedCollectionIds.Count == 0
+                ? new List<BeatmapDb>()
+                : await query
+                    .Where(b => pagedCollectionIds.Contains(b.CollectionId))
+                    .ToListAsync();
+
+            var groupedRows = pageRows
+                .GroupBy(b => b.CollectionId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var items = new List<BeatmapListItemDto>(pagedCollectionIds.Count);
+            foreach (var collectionId in pagedCollectionIds)
+            {
+                if (!groupedRows.TryGetValue(collectionId, out var collectionRows) || collectionRows.Count == 0)
+                {
+                    continue;
+                }
+
+                var first = collectionRows[0];
+                items.Add(new BeatmapListItemDto
+                {
+                    CollectionId = first.CollectionId,
+                    SongName = first.SongName,
+                    IllustrateUrl = first.IllustrateUrl,
+                    Illustrator = first.Illustrator,
+                    Composer = first.Composer,
+                    Divisions = collectionRows.Select(row => new BeatmapDivisionDto
+                    {
+                        BeatmapId = row.BeatmapId,
+                        Difficulty = row.Difficulty,
+                        LevelColor = row.LevelColor,
+                        LevelDesigner = row.LevelDesigner
+                    }).ToList()
+                });
+            }
+
+            var result = new BeatmapPagedDto
+            {
+                Page = normalizedPage,
+                PageSize = normalizedPageSize,
+                Total = total,
+                TotalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)normalizedPageSize),
+                Items = items
+            };
+            return result;
         }
-        return results;
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to retrieve beatmap collections page");
+            return Error.Failure("Global.DatabaseError", "Failed to retrieve beatmap collections page");
+        }
     }
 
     /// <summary>
@@ -286,5 +395,20 @@ public class BeatmapService(AppDbContext db,
         }
 
         return charts;
+    }
+
+    private static string BuildCollectionCacheKey(Guid collectionId, bool availableOnly)
+        => $"{BeatmapCollectionDetailCachePrefix}{collectionId}:a{availableOnly}";
+
+    private static string BuildCollectionIdsCacheKey(bool availableOnly)
+        => $"{BeatmapCollectionIdsCachePrefix}a{availableOnly}";
+
+    private async Task InvalidateCollectionCachesAsync(Guid collectionId)
+    {
+        var redisDb = redis.GetDatabase();
+        await redisDb.KeyDeleteAsync(BuildCollectionCacheKey(collectionId, true));
+        await redisDb.KeyDeleteAsync(BuildCollectionCacheKey(collectionId, false));
+        await redisDb.KeyDeleteAsync(BuildCollectionIdsCacheKey(true));
+        await redisDb.KeyDeleteAsync(BuildCollectionIdsCacheKey(false));
     }
 }

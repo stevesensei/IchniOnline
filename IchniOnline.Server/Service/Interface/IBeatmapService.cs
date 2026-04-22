@@ -12,6 +12,8 @@ public interface IBeatmapService
 
     Task<ErrorOr<BeatmapDto>> GetBeatmapCollection(Guid collectionId, bool availableOnly);
 
+    Task<ErrorOr<BeatmapPagedDto>> GetBeatmapCollectionsPage(int page, int pageSize, bool availableOnly);
+
     Task<ErrorOr<List<BeatmapNoteChartComponent>>> GetBeatmapChart(Guid beatmapGuid);
 }
 
