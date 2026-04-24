@@ -6,7 +6,7 @@ public class TapTapOauth
 {
     public Guid Id { get; set; }
     
-    public Guid BindUserId { get; set; }
+    public Guid? BindUserId { get; set; }
     
     /// <summary>
     /// 按游戏划分的id

@@ -1,4 +1,5 @@
 var builder = DistributedApplication.CreateBuilder(args);
+builder.AddDockerComposeEnvironment("env");
 //基础设施
 var postgres 
     = builder.AddPostgres("MainDB")
@@ -18,6 +19,7 @@ var server = builder.AddProject<Projects.IchniOnline_Server>("server")
     .WithReference(cache).WaitFor(cache);
 //前端
 var webFront = builder.AddViteApp("IchniOnlineFront", "../IchniOnline.Frontend")
+    .WithPnpm()
     .WithReference(server)
     .WaitFor(server);
 

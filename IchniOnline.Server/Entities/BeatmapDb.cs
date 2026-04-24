@@ -53,6 +53,11 @@ public class BeatmapDb
     public List<BeatmapNoteDto> Notes { get; set; } = null!;
 
     /// <summary>
+    /// 难度定数
+    /// </summary>
+    public double DifficultyRating { get; set; } = 10;
+
+    /// <summary>
     /// 标记一个谱面的版本，初始值为1，每次修改谱面时递增
     /// <remarks>这个设计不一定需要，但是涉及到排行榜的计算</remarks>
     /// </summary>

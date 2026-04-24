@@ -190,7 +190,7 @@ namespace IchniOnline.Server.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<Guid>("BindUserId")
+                    b.Property<Guid?>("BindUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("user_id");
 
